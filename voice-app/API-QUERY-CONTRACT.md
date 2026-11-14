@@ -1,3 +1,9 @@
+# Archived upstream API reference
+
+**Not active in Gemini Live R2.** The deployment disables outbound/query HTTP APIs. Follow `../deployment/README.md`; this older API contract is retained only as an upstream reference.
+
+---
+
 # API Contract: Device Personality Query Endpoint
 **Version:** 1.0.0  
 **Status:** DRAFT  

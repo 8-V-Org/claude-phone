@@ -1,0 +1,41 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {normalizeDestination,acceptedDestination,BLOCKED_NPAS,MSG_INTL}=require('./destination');
+test('extensions are always accepted and PSTN forms require allowPstn plus NANP normalization',()=>{
+ assert.deepEqual(normalizeDestination('30911'),{to:'30911',kind:'extension'});
+ assert.deepEqual(normalizeDestination(' 30910 '),{to:'30910',kind:'extension'});
+ assert.equal(normalizeDestination('+16174449080'),null);
+ assert.equal(normalizeDestination('6174449080'),null);
+ assert.deepEqual(normalizeDestination('+16174449080',{allowPstn:true}),{to:'+16174449080',kind:'pstn'});
+ assert.deepEqual(normalizeDestination('617-444-9080',{allowPstn:true}),{to:'+16174449080',kind:'pstn'});
+ assert.deepEqual(normalizeDestination('(617) 444.9080',{allowPstn:true}),{to:'+16174449080',kind:'pstn'});
+ assert.deepEqual(normalizeDestination('16174449080',{allowPstn:true}),{to:'+16174449080',kind:'pstn'});
+ assert.deepEqual(normalizeDestination('0016174449080',{allowPstn:true}),{to:'+16174449080',kind:'pstn'});
+ assert.equal(normalizeDestination('sip:30911@evil',{allowPstn:true}),null);
+ assert.equal(normalizeDestination('456\r\nX: evil',{allowPstn:true}),null);
+ assert.equal(normalizeDestination('+01234',{allowPstn:true}),null);
+ assert.equal(normalizeDestination('+1',{allowPstn:true}),null);
+ assert.equal(normalizeDestination('+1234567890123456',{allowPstn:true}),null);
+ assert.equal(normalizeDestination(''),null);
+ assert.equal(normalizeDestination(123),null);
+ assert.ok(acceptedDestination(normalizeDestination('6174449080',{allowPstn:true})));
+});
+test('international and blocked Caribbean/premium NPAs are rejected with a clear error',()=>{
+ const intl=normalizeDestination('+442071838750',{allowPstn:true});
+ assert.equal(intl.error,true);assert.equal(intl.code,'INTERNATIONAL_BLOCKED');assert.equal(intl.message,MSG_INTL);
+ assert.equal(acceptedDestination(intl),false);
+ const zero=normalizeDestination('00442071838750',{allowPstn:true});
+ assert.equal(zero.code,'INTERNATIONAL_BLOCKED');
+ const usIntl=normalizeDestination('011442071838750',{allowPstn:true});
+ assert.equal(usIntl.code,'INTERNATIONAL_BLOCKED');
+ const jam=normalizeDestination('8765551212',{allowPstn:true});
+ assert.equal(jam.code,'NPA_BLOCKED');assert.match(jam.message,/NPA 876/);
+ const cay=normalizeDestination('+13455551212',{allowPstn:true});
+ assert.equal(cay.code,'NPA_BLOCKED');assert.match(cay.message,/NPA 345/);
+ const prem=normalizeDestination('1-900-555-1212',{allowPstn:true});
+ assert.equal(prem.code,'NPA_BLOCKED');assert.match(prem.message,/NPA 900/);
+ // US territories stay allowed
+ assert.deepEqual(normalizeDestination('7875551212',{allowPstn:true}),{to:'+17875551212',kind:'pstn'});
+ assert.deepEqual(normalizeDestination('3405551212',{allowPstn:true}),{to:'+13405551212',kind:'pstn'});
+ assert.ok(BLOCKED_NPAS.includes('876')&&BLOCKED_NPAS.includes('900')&&!BLOCKED_NPAS.includes('787'));
+});

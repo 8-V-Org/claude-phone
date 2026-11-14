@@ -4,20 +4,23 @@
  */
 
 require("dotenv").config();
+var liveMode = (process.env.PHONE_VOICE_MODE || "live") === "live";
+require('./lib/drachtio-byte-framing').installDrachtioByteFraming();
 var Srf = require("drachtio-srf");
 var Mrf = require("drachtio-fsmrf");
 
 // Import application modules
-var httpServerModule = require("./lib/http-server");
-var createHttpServer = httpServerModule.createHttpServer;
-var cleanupOldFiles = httpServerModule.cleanupOldFiles;
-var AudioForkServer = require("./lib/audio-fork").AudioForkServer;
+var httpServerModule = liveMode ? null : require("./lib/http-server");
+var createHttpServer = httpServerModule && httpServerModule.createHttpServer;
+var AudioForkServer = (process.env.PHONE_VOICE_MODE || "live") === "live"
+  ? require("./lib/live-media").LiveAudioForkServer
+  : require("./lib/audio-fork").AudioForkServer;
 var sipHandler = require("./lib/sip-handler");
 var handleInvite = sipHandler.handleInvite;
 var extractCallerId = sipHandler.extractCallerId;
-var whisperClient = require("./lib/whisper-client");
-var claudeBridge = require("./lib/claude-bridge");
-var ttsService = require("./lib/tts-service");
+var whisperClient = liveMode ? null : require("./lib/speech-providers");
+var claudeBridge = liveMode ? null : require("./lib/claude-bridge");
+var ttsService = liveMode ? null : require("./lib/speech-providers");
 
 // Multi-extension support
 var deviceRegistry = require("./lib/device-registry");
@@ -28,14 +31,14 @@ var connectionRetry = require("./lib/connection-retry");
 var connectWithRetry = connectionRetry.connectWithRetry;
 
 // Import outbound calling routes
-var outboundModule = require("./lib/outbound-routes");
-var outboundRouter = outboundModule.router;
-var setupOutboundRoutes = outboundModule.setupRoutes;
+var outboundModule = liveMode ? null : require("./lib/outbound-routes");
+var outboundRouter = outboundModule && outboundModule.router;
+var setupOutboundRoutes = outboundModule && outboundModule.setupRoutes;
 
 // Import query routes
-var queryModule = require("./lib/query-routes");
-var queryRouter = queryModule.router;
-var setupQueryRoutes = queryModule.setupRoutes;
+var queryModule = liveMode ? null : require("./lib/query-routes");
+var queryRouter = queryModule && queryModule.router;
+var setupQueryRoutes = queryModule && queryModule.setupRoutes;
 
 // Load device registry first
 // deviceRegistry is a singleton, already instantiated
@@ -141,11 +144,7 @@ var mrf = new Mrf(srf);
 
 // Define FreeSWITCH connection function
 function connectToFreeswitch() {
-  return mrf.connect({
-    address: config.freeswitch.host,
-    port: config.freeswitch.port,
-    secret: config.freeswitch.secret
-  });
+  return mrf.connect(require("./lib/mrf-options").localMrfOptions(config.freeswitch));
 }
 
 // Connect with exponential backoff retry
@@ -172,6 +171,22 @@ connectWithRetry(connectToFreeswitch, {
 
 // Initialize servers
 function initializeServers() {
+  if (liveMode) {
+    audioForkServer = new AudioForkServer({ port: config.ws_port });
+    audioForkServer.start();
+    console.log("Live PCM media listener starting on loopback port " + config.ws_port);
+    require('./lib/live-services').startLiveServices({
+      srf: srf, getMediaServer: () => mediaServer,
+      audioForkServer: audioForkServer, wsPort: config.ws_port, port: config.http_port
+    }).then(server => {
+      httpServer = server;
+      console.info('[PHONE_API] ready loopback-and-private-unix-socket');
+    }).catch(error => {
+      console.error('[PHONE_API] startup-failed', {code: error.code || 'STARTUP_FAILED', message: error.message});
+      process.exit(1);
+    });
+    return;
+  }
   var fs = require("fs");
   if (!fs.existsSync(config.audio_dir)) {
     fs.mkdirSync(config.audio_dir, { recursive: true });
@@ -239,6 +254,7 @@ function checkReadyState() {
     // Register SIP INVITE handler
     srf.invite(function(req, res) {
       handleInvite(req, res, {
+        srf: srf,
         audioForkServer: audioForkServer,
         mediaServer: mediaServer,
         deviceRegistry: deviceRegistry,

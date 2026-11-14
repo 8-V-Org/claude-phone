@@ -1,0 +1,7 @@
+FROM drachtio/drachtio-freeswitch-mrf@sha256:2f1583c31259fbf38df3df2e0955e2ffda7f6d2410888718de110b568ea9dac3
+# Fail closed if the pinned upstream startup layout no longer matches.
+RUN test -f /entrypoint.sh && grep -q '0.0.0.0' /entrypoint.sh \
+ && sed -i 's/0\.0\.0\.0/127.0.0.1/g; s@\\/0@\\/32@g' /entrypoint.sh \
+ && sed -i 's/name="sip-ip" value="[^"]*"/name="sip-ip" value="127.0.0.1"/' /usr/local/freeswitch/conf/sip_profiles/mrf.xml
+COPY deployment/start-freeswitch.sh /phone/start.sh
+ENTRYPOINT ["/bin/sh","/phone/start.sh"]

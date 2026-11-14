@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+FROM node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+WORKDIR /app
+COPY voice-app/package.json voice-app/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
+COPY voice-app/ ./
+COPY deployment/configure.cjs /app/deployment/configure.cjs
+# Hermes (OCI A1, arm64): arm64 build of the same pinned release; checksum from tools/checksums.txt
+ADD --checksum=sha256:1191998d49b7ba08944f3e9495ff007289dd1570e436325696455f18d52cfe24 https://github.com/google-gemini/gemini-api-cli/releases/download/v0.4.5/gemini-api_Linux_arm64.tar.gz /tmp/gemini-api.tar.gz
+RUN tar -xzf /tmp/gemini-api.tar.gz -C /usr/local/bin gemini-api && rm /tmp/gemini-api.tar.gz
+RUN chmod 755 /usr/local/bin/gemini-api && mkdir -p /app/audio /app/config && chown -R 1002:8000 /app/audio /app/config
+USER 1002:8000
+ENV HOME=/tmp XDG_CONFIG_HOME=/tmp/gemini-config XDG_CACHE_HOME=/tmp/gemini-cache
+CMD ["node","--max-old-space-size=96","/app/deployment/bootstrap.cjs"]

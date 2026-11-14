@@ -1,7 +1,7 @@
 {
   "name": "claude-phone-voice-app",
   "version": "1.0.0",
-  "description": "Voice interface for Claude Code via SIP/3CX",
+  "description": "SIP voice bridge for OpenClaw with Gemini Live and explicit batch speech alternatives",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -19,7 +19,8 @@
     "openai": "^4.20.0",
     "uuid": "^9.0.0",
     "wavefile": "^11.0.0",
-    "ws": "^8.14.0"
+    "ws": "^8.14.0",
+    "@google/genai": "3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

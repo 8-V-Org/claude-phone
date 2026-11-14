@@ -37,24 +37,14 @@ function getRandomThinkingPhrase() {
 }
 
 function extractCallerId(req) {
-  var from = req.get("From") || "";
-  var match = from.match(/sip:([+\d]+)@/);
-  if (match) return match[1];
-  var numMatch = from.match(/<sip:(\d+)@/);
-  if (numMatch) return numMatch[1];
-  return "unknown";
+  return require('./call-gate').sipAddressUser(req.get('From')) || 'unknown';
 }
 
 /**
  * Extract dialed extension from SIP To header
  */
 function extractDialedExtension(req) {
-  var to = req.get("To") || "";
-  var match = to.match(/sip:(\d+)@/);
-  if (match) {
-    return match[1];
-  }
-  return null;
+  return require('./call-gate').sipAddressUser(req.get('To')) || null;
 }
 
 function isGoodbye(transcript) {
@@ -309,7 +299,18 @@ function stripVideoFromSdp(sdp) {
 /**
  * Handle incoming SIP INVITE
  */
+const gate = require('./call-gate').createCallGate({
+  sources: (process.env.PHONE_SIP_SOURCES || '').split(',').filter(Boolean),
+  callers: (process.env.PHONE_ALLOWED_CALLERS || '').split(',').filter(Boolean),
+  extension: process.env.SIP_EXTENSION
+});
 async function handleInvite(req, res, options) {
+  return gate(req, res, policy => {
+    if (policy.callerTier !== 'approved' && (process.env.PHONE_VOICE_MODE || 'live') !== 'live') {res.send(403);return;}
+    return handleAcceptedInvite(req, res, {...options,...policy});
+  });
+}
+async function handleAcceptedInvite(req, res, options) {
   const { mediaServer, deviceRegistry } = options;
 
   const callerId = extractCallerId(req);
@@ -348,7 +349,14 @@ async function handleInvite(req, res, options) {
       if (endpoint) endpoint.destroy().catch(function() {});
     });
 
-    await conversationLoop(endpoint, dialog, callUuid, options, deviceConfig);
+    const maxCallMs = require('./call-limits').MAX_CALL_MS;
+    const callTimer = maxCallMs > 0 ? setTimeout(() => { try { Promise.resolve(dialog.destroy()).catch(() => {}); } catch {} }, maxCallMs) : null;
+    try {
+      if ((process.env.PHONE_VOICE_MODE || 'live') === 'live')
+        await require('./live-call').runLiveCall(endpoint, dialog, callUuid, options);
+      else await conversationLoop(endpoint, dialog, callUuid, options, deviceConfig);
+    }
+    finally { if (callTimer) clearTimeout(callTimer); }
     return { endpoint: endpoint, dialog: dialog, callerId: callerId, callUuid: callUuid };
 
   } catch (error) {

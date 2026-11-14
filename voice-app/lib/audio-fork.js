@@ -288,7 +288,7 @@ class AudioForkSession extends EventEmitter {
 }
 
 class AudioForkServer extends EventEmitter {
-  constructor({ port = 3001, host = '0.0.0.0' } = {}) {
+  constructor({ port = 3001, host = '127.0.0.1' } = {}) {
     super();
     this.port = port;
     this.host = host;
