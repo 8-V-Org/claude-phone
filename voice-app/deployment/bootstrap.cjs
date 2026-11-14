@@ -1,0 +1,21 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
+const {resolvePhonePolicy}=require('../lib/phone-policy');
+process.env.PHONE_VOICE_MODE ||= 'live';
+if(!['live','batch'].includes(process.env.PHONE_VOICE_MODE))throw Error('PHONE_VOICE_MODE must be live or batch');
+process.env.STT_PROVIDER ||= 'gemini';process.env.TTS_PROVIDER ||= 'gemini';
+if(process.env.PHONE_VOICE_MODE==='batch'&&![process.env.STT_PROVIDER,process.env.TTS_PROVIDER].every(p=>['gemini','openai'].includes(p)))throw Error('Unsupported batch speech provider');
+const dir='/run/phone-secrets';let config;
+try{config=JSON.parse(fs.readFileSync(path.join(dir,'phone.json'),'utf8'));}catch{throw Error('Could not parse private phone configuration; content withheld');}
+for(const k of ['domain','registrar','extension','authId','password','externalIp'])if(typeof config[k]!=='string'||!config[k])throw Error('Missing required phone configuration field');
+const policy=resolvePhonePolicy(config,process.env);
+if(!/^\d{1,8}$/.test(config.extension)||!net.isIP(config.externalIp)||!Array.isArray(config.sources)||!config.sources.length||!config.sources.every(net.isIP)||!Array.isArray(config.callers)||!config.callers.every(x=>typeof x==='string')||(policy.callerPolicy==='allowlist'&&!config.callers.length))throw Error('Invalid phone routing or caller policy');
+if(policy.callerPolicy==='tiered'&&process.env.PHONE_VOICE_MODE!=='live')throw Error('Caller tiering requires live mode');
+const secret=name=>fs.readFileSync(path.join(dir,name),'utf8').trim();
+Object.assign(process.env,{SIP_DOMAIN:config.domain,SIP_REGISTRAR:config.registrar,SIP_EXTENSION:config.extension,SIP_AUTH_ID:config.authId,SIP_AUTH_PASSWORD:config.password,EXTERNAL_IP:config.externalIp,PHONE_SIP_SOURCES:config.sources.join(','),PHONE_ALLOWED_CALLERS:config.callers.join(','),DRACHTIO_SECRET:secret('drachtio-secret'),FREESWITCH_SECRET:secret('freeswitch-secret'),PHONE_BRIDGE_TOKEN_FILE:path.join(dir,'bridge-token'),PHONE_CALLER_POLICY:policy.callerPolicy,PHONE_MAX_CONCURRENT_CALLS:String(policy.maxConcurrent),PHONE_RATE_LIMIT_PER_FROM:String(policy.rateLimit),PHONE_RATE_WINDOW_MS:String(policy.rateWindowMs),PHONE_MAX_CALL_DURATION_MS:String(policy.maxDurationMs)});
+for(const [env,name]of [['GEMINI_API_KEY','gemini-key'],['OPENAI_API_KEY','openai-key']])if(fs.existsSync(path.join(dir,name)))process.env[env]=secret(name);
+if((process.env.PHONE_VOICE_MODE==='live'||process.env.STT_PROVIDER==='gemini'||process.env.TTS_PROVIDER==='gemini')&&!process.env.GEMINI_API_KEY)throw Error('Google API key file is missing');
+if(process.env.PHONE_VOICE_MODE==='batch'&&(process.env.STT_PROVIDER==='openai'||process.env.TTS_PROVIDER==='openai')&&!process.env.OPENAI_API_KEY)throw Error('OpenAI API key file is missing');
+const device={name:'Business Receptionist',extension:config.extension,authId:config.authId,password:config.password,voiceId:'Kore',prompt:'Only approved public FAQ facts; no internal data or privileged phone actions.'};
+fs.mkdirSync('/app/config',{recursive:true});fs.writeFileSync('/app/config/devices.json',JSON.stringify({[config.extension]:device}),{mode:0o600});
+require('../index.js');

@@ -4,20 +4,25 @@
  */
 
 require("dotenv").config();
+// Upstream MRF debug output includes its control secret. Never enable it here.
+delete process.env.DEBUG;
+var liveMode = (process.env.PHONE_VOICE_MODE || "live") === "live";
+require("./lib/drachtio-byte-framing").install();
 var Srf = require("drachtio-srf");
 var Mrf = require("drachtio-fsmrf");
 
 // Import application modules
-var httpServerModule = require("./lib/http-server");
-var createHttpServer = httpServerModule.createHttpServer;
-var cleanupOldFiles = httpServerModule.cleanupOldFiles;
-var AudioForkServer = require("./lib/audio-fork").AudioForkServer;
+var httpServerModule = liveMode ? null : require("./lib/http-server");
+var createHttpServer = httpServerModule && httpServerModule.createHttpServer;
+var AudioForkServer = (process.env.PHONE_VOICE_MODE || "live") === "live"
+  ? require("./lib/live-media").LiveAudioForkServer
+  : require("./lib/audio-fork").AudioForkServer;
 var sipHandler = require("./lib/sip-handler");
 var handleInvite = sipHandler.handleInvite;
 var extractCallerId = sipHandler.extractCallerId;
-var whisperClient = require("./lib/whisper-client");
-var claudeBridge = require("./lib/claude-bridge");
-var ttsService = require("./lib/tts-service");
+var whisperClient = liveMode ? null : require("./lib/speech-providers");
+var claudeBridge = liveMode ? null : require("./lib/claude-bridge");
+var ttsService = liveMode ? null : require("./lib/speech-providers");
 
 // Multi-extension support
 var deviceRegistry = require("./lib/device-registry");
@@ -27,15 +32,7 @@ var MultiRegistrar = require("./lib/multi-registrar");
 var connectionRetry = require("./lib/connection-retry");
 var connectWithRetry = connectionRetry.connectWithRetry;
 
-// Import outbound calling routes
-var outboundModule = require("./lib/outbound-routes");
-var outboundRouter = outboundModule.router;
-var setupOutboundRoutes = outboundModule.setupRoutes;
-
-// Import query routes
-var queryModule = require("./lib/query-routes");
-var queryRouter = queryModule.router;
-var setupQueryRoutes = queryModule.setupRoutes;
+// Outbound dialing, query HTTP APIs and external transfer are not mounted.
 
 // Load device registry first
 // deviceRegistry is a singleton, already instantiated
@@ -73,6 +70,7 @@ var mediaServer = null;
 var httpServer = null;
 var audioForkServer = null;
 var registrar = null;
+var phoneWorker = null;
 var drachtioConnected = false;
 var freeswitchConnected = false;
 var isReady = false;
@@ -141,11 +139,7 @@ var mrf = new Mrf(srf);
 
 // Define FreeSWITCH connection function
 function connectToFreeswitch() {
-  return mrf.connect({
-    address: config.freeswitch.host,
-    port: config.freeswitch.port,
-    secret: config.freeswitch.secret
-  });
+  return mrf.connect(require("./lib/mrf-options").localMrfOptions(config.freeswitch));
 }
 
 // Connect with exponential backoff retry
@@ -172,6 +166,13 @@ connectWithRetry(connectToFreeswitch, {
 
 // Initialize servers
 function initializeServers() {
+  if (liveMode) {
+    audioForkServer = new AudioForkServer({ port: config.ws_port });
+    audioForkServer.start();
+    phoneWorker = require('./lib/phone-worker').startWorker({srf,mediaServer,audioForkServer,config,registrar,wsPort:config.ws_port,capacity:require('./lib/call-capacity').sharedCapacity(require('./lib/phone-policy').resolvePhonePolicy({},process.env).maxConcurrent)});
+    console.log("Live PCM media listener starting on loopback port " + config.ws_port);
+    return;
+  }
   var fs = require("fs");
   if (!fs.existsSync(config.audio_dir)) {
     fs.mkdirSync(config.audio_dir, { recursive: true });
@@ -195,35 +196,12 @@ function initializeServers() {
   ttsService.setAudioDir(config.audio_dir);
   console.log("[" + new Date().toISOString() + "] TTS Service configured");
 
-  // ========== OUTBOUND CALLING ROUTES ==========
-  setupOutboundRoutes({
-    srf: srf,
-    mediaServer: mediaServer,
-    deviceRegistry: deviceRegistry,  // Required for device lookup
-    audioForkServer: audioForkServer,
-    whisperClient: whisperClient,
-    claudeBridge: claudeBridge,
-    ttsService: ttsService,
-    wsPort: config.ws_port
-  });
-
-  httpServer.app.use("/api", outboundRouter);
-  console.log("[" + new Date().toISOString() + "] OUTBOUND Calling API enabled");
-
-  // ========== QUERY API ROUTES ==========
-  setupQueryRoutes({
-    claudeBridge: claudeBridge
-  });
-
-  httpServer.app.use("/api", queryRouter);
-  console.log("[" + new Date().toISOString() + "] QUERY API enabled (/api/query, /api/devices)");
-
   // Finalize HTTP server
   httpServer.finalize();
 
   // Cleanup old files periodically
   setInterval(function() {
-    cleanupOldFiles(config.audio_dir, 5 * 60 * 1000);
+    httpServerModule.cleanupOldFiles(config.audio_dir, 5 * 60 * 1000);
   }, 60 * 1000);
 }
 
@@ -239,6 +217,7 @@ function checkReadyState() {
     // Register SIP INVITE handler
     srf.invite(function(req, res) {
       handleInvite(req, res, {
+        srf: srf,
         audioForkServer: audioForkServer,
         mediaServer: mediaServer,
         deviceRegistry: deviceRegistry,
@@ -261,6 +240,7 @@ function checkReadyState() {
 // Graceful shutdown
 function shutdown(signal) {
   console.log("\n[" + new Date().toISOString() + "] Received " + signal + ", shutting down...");
+  if (phoneWorker) phoneWorker.stop();
   if (registrar) registrar.stop();
   if (httpServer) httpServer.close();
   if (audioForkServer) audioForkServer.stop();

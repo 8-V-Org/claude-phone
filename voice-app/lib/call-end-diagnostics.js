@@ -1,0 +1,5 @@
+'use strict';
+const net=require('node:net');
+function hangupDetails(req,reason){const get=name=>{try{return req?.get?.(name)||'';}catch{return '';}};const header=String(get('Reason')).slice(0,512);const source=req?.meta?.source;const supplied=String(req?.source_address||'').replace(/^::ffff:/,'');const text=/text\s*=\s*"([^"]{0,120})"/i.exec(header)?.[1]||'';const known=/^(?:Call terminated|Normal call clearing|Normal Clearing|User busy|Request terminated|Session timeout)$/i.test(text)?text:null;return {origin:source==='network'?'peer-bye':source==='application'?'application-bye':'sip-bye-unknown-origin',source:source==='network'||source==='application'?source:'unknown',peerAddress:net.isIP(supplied)?supplied:null,reasonProtocol:/^\s*(SIP|Q\.850)\b/i.exec(header)?.[1]||null,reasonCause:Number(/cause\s*=\s*(\d{1,3})/i.exec(header)?.[1])||null,reasonText:known,libraryReason:reason==='normal release'?'normal release':null};}
+function safeSipCallId(dialog){const id=dialog?.sip?.callId;return typeof id==='string'&&/^[a-zA-Z0-9@._-]{1,180}$/.test(id)?id:null;}
+module.exports={hangupDetails,safeSipCallId};

@@ -1,0 +1,9 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {hangupDetails,safeSipCallId}=require('../lib/call-end-diagnostics');
+const {LiveToolRouter}=require('../lib/live-tools');
+const flush=()=>new Promise(r=>setImmediate(r));
+test('peer BYE source/cause are classified without reading or logging credential headers',()=>{const read=[];const d=hangupDetails({meta:{source:'network'},source_address:'::ffff:192.0.2.1',get:name=>{read.push(name);return 'SIP;cause=200;text="Call terminated"';}},'normal release');assert.equal(d.origin,'peer-bye');assert.equal(d.peerAddress,'192.0.2.1');assert.equal(d.reasonCause,200);assert.equal(d.reasonText,'Call terminated');assert.deepEqual(read,['Reason']);});
+test('absent BYE metadata does not invent a remote/human hangup',()=>{const d=hangupDetails();assert.equal(d.origin,'sip-bye-unknown-origin');assert.equal(d.peerAddress,null);assert.equal(d.reasonText,null);});
+test('unknown freeform Reason text and malformed Call-ID are not dumped',()=>{assert.equal(hangupDetails({get:()=> 'SIP;text="PRIVATE ARBITRARY DATA"'}).reasonText,null);assert.equal(safeSipCallId({sip:{callId:'bad\r\nAuthorization: secret'}}),null);assert.equal(safeSipCallId({sip:{callId:'normal-call-id@pbx.example'}}),'normal-call-id@pbx.example');});
+test('post-save submission hook runs once after send and cannot turn a saved message into failure',async()=>{let sent=0,hooks=0;const r=new LiveToolRouter({send:()=>sent++,onMessageAckSubmitted:()=>{hooks++;throw Error('Synthetic telemetry failure');},onFault:assert.fail,messageStore:{save:async()=>({recorded:true})}});r.handle([{id:'one',name:'record_message',args:{name:'Test',callback:'000',reason:'Synthetic',consent:true}}]);await flush();assert.equal(sent,1);assert.equal(hooks,1);assert.equal(r.messagesSaved,1);assert.equal(r.toolResponseFailures,0);r.close();});

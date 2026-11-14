@@ -1,0 +1,6 @@
+FROM node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+WORKDIR /app
+COPY openclaw-adapter/server.cjs openclaw-adapter/phone-operations.cjs ./
+COPY voice-app/lib/destination.js /voice-app/lib/destination.js
+USER 1002:8000
+CMD ["node","--max-old-space-size=48","server.cjs"]

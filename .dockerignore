@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.git
+**/.env
+**/devices.json
+**/audio
+**/audio-temp
+deployment/tools/*.tar.gz
+deployment/tools/checksums.txt
+openclaw-adapter/reference-*
+openclaw-adapter/dependency-audit.json
+**/*.log
+
+deployment/tools/gemini-api

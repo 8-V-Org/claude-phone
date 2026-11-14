@@ -1,6 +1,15 @@
+# Local tools, research captures and runtime message data
+deployment/tools/gemini-api
+deployment/tools/*.tar.gz
+openclaw-adapter/reference-*.md
+openclaw-adapter/dependency-audit*.json
+openclaw-adapter/INITIAL-PLAN.md
+voice-app/messages/
+
 # Dependencies
 node_modules/
 package-lock.json
+!voice-app/package-lock.json
 
 # Environment files (contain secrets!)
 .env

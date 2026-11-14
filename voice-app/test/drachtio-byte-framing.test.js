@@ -1,0 +1,13 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),{EventEmitter}=require('node:events');
+const {install}=require('../lib/drachtio-byte-framing');install();
+const Wire=require('drachtio-srf/lib/wire-protocol');
+function frame(s){return Buffer.from(Buffer.byteLength(s)+'#'+s);}
+function fixture(){const wire=new Wire({}),socket={destroy:e=>socket.failure=e};const messages=[];wire.on('msg',(s,m)=>messages.push(m));return {wire,socket,messages,feed:b=>wire._onData(socket,b)};}
+test('pinned dependency stays 4.5.43 and patch installs idempotently',()=>{assert.equal(require('drachtio-srf/package.json').version,'4.5.43');assert.equal(install(),false);});
+test('Unicode Contact does not stall or consume following frame',()=>{const f=fixture(),a='id|response|200 OK\r\nContact: "Zoë ☎ 😀" <sip:123@pbx>\r\n',b='next|response|200 OK';f.feed(Buffer.concat([frame(a),frame(b)]));assert.deepEqual(f.messages,[a,b]);assert.equal(f.wire.mapIncomingMsg.get(f.socket).incomingMsg.length,0);});
+test('every byte split including UTF-8 multibyte and length-prefix boundaries',()=>{const a='message|Åß中文🚀',b='next|ascii',bytes=Buffer.concat([frame(a),frame(b)]);for(let i=0;i<=bytes.length;i++){const f=fixture();f.feed(bytes.subarray(0,i));f.feed(bytes.subarray(i));assert.deepEqual(f.messages,[a,b]);assert.equal(f.socket.failure,undefined);}});
+test('one byte chunks and multiple back-to-back frames preserve exact text',()=>{const f=fixture(),strings=['one|café','two|📞','three|終了'],bytes=Buffer.concat(strings.map(frame));for(const b of bytes)f.feed(Buffer.from([b]));assert.deepEqual(f.messages,strings);});
+test('invalid frames fail without including SIP payload or credentials in error',()=>{for(const bytes of [Buffer.from('bad-secret-frame'),Buffer.from('00000#'),Buffer.from('100000#')]){const f=fixture();f.feed(bytes);assert.ok(f.socket.failure);assert.doesNotMatch(f.socket.failure.message,/secret/);}});
+test('socket listeners remain byte-oriented and original close cleanup survives',()=>{const f=fixture(),socket=new EventEmitter();socket.setEncoding=()=>assert.fail('utf8 decoder must not be installed');socket.destroy=assert.fail;f.wire.closing=true;f.wire.reconnectVars={retryTimer:null};f.wire.installListeners(socket);socket.emit('data',frame('a|é'));assert.deepEqual(f.messages,['a|é']);socket.emit('close');assert.equal(f.wire.mapIncomingMsg.has(socket),false);});
+test('outbound sender advertises byte length unchanged',()=>{const w=new Wire({}),writes=[];w.send({write:(s,cb)=>{writes.push(Buffer.from(s));cb();}},'sip|☃😀');const b=writes[0],hash=b.indexOf(35);assert.equal(Number(b.subarray(0,hash).toString()),b.length-hash-1);});

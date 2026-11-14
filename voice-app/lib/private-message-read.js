@@ -1,0 +1,7 @@
+'use strict';
+const crypto=require('node:crypto');
+const PREFIX='private-message-read-v1.';
+function parseRequest(value){if(typeof value!=='string'||!value.startsWith(PREFIX)||value.length>4000)throw Error('Invalid private read request');const data=JSON.parse(Buffer.from(value.slice(PREFIX.length),'base64url').toString('utf8'));if(!/^[a-f0-9]{32}$/.test(data.reference)||typeof data.publicKey!=='string'||Object.keys(data).some(k=>!['reference','publicKey'].includes(k)))throw Error('Invalid private read fields');const key=crypto.createPublicKey(data.publicKey);if(key.asymmetricKeyType!=='rsa'||key.asymmetricKeyDetails.modulusLength<2048||key.asymmetricKeyDetails.modulusLength>4096)throw Error('Invalid readback public key');return {...data,key};}
+function seal(record,key){const aes=crypto.randomBytes(32),iv=crypto.randomBytes(12);const cipher=crypto.createCipheriv('aes-256-gcm',aes,iv);const ciphertext=Buffer.concat([cipher.update(JSON.stringify(record),'utf8'),cipher.final()]);return {sealedMessageRead:true,version:1,algorithm:'RSA-OAEP-SHA256+A256GCM',key:crypto.publicEncrypt({key,oaepHash:'sha256'},aes).toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')};}
+async function readSealedMessage(store,request){const data=parseRequest(request);const record=await store.read(data.reference);return seal(record,data.key);}
+module.exports={PREFIX,parseRequest,readSealedMessage};

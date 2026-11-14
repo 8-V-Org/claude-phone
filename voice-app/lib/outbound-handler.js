@@ -11,7 +11,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const logger = require('./logger');
-const ttsService = require('./tts-service');
+const ttsService = require('./speech-providers');
 
 /**
  * Initiate an outbound call

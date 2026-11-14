@@ -29,6 +29,9 @@ const FILE_MAX_AGE = 600000;
 function createHttpServer(audioDir, port = 3000) {
   const app = express();
 
+  // Keep call-control/query endpoints disabled until separately authorized.
+  app.use('/api', (req, res) => res.status(403).json({ error: 'Call-control API disabled' }));
+
   // Parse JSON bodies
   app.use(express.json());
 
@@ -112,7 +115,8 @@ function createHttpServer(audioDir, port = 3000) {
   // NOTE: 404 and error handlers are added in finalize() AFTER additional routes
 
   // Start server
-  const server = app.listen(port, () => {
+  // Call-control and generated audio stay local to the media host.
+  const server = app.listen(port, '127.0.0.1', () => {
     debug(`HTTP server listening on port ${port}`);
     debug(`Serving audio files from ${audioDir}`);
   });

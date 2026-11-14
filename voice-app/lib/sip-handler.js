@@ -309,7 +309,19 @@ function stripVideoFromSdp(sdp) {
 /**
  * Handle incoming SIP INVITE
  */
+const callPolicy = require('./phone-policy').resolvePhonePolicy({}, process.env);
+const gate = require('./call-gate').createCallGate({
+  ...callPolicy,
+  capacity: require('./call-capacity').sharedCapacity(callPolicy.maxConcurrent),
+  audit: event => console.info('[CALL_GATE]', JSON.stringify(event)),
+  sources: (process.env.PHONE_SIP_SOURCES || '').split(',').filter(Boolean),
+  callers: (process.env.PHONE_ALLOWED_CALLERS || '').split(',').filter(Boolean),
+  extension: process.env.SIP_EXTENSION
+});
 async function handleInvite(req, res, options) {
+  return gate(req, res, callContext => handleAcceptedInvite(req, res, {...options, callContext}));
+}
+async function handleAcceptedInvite(req, res, options) {
   const { mediaServer, deviceRegistry } = options;
 
   const callerId = extractCallerId(req);
@@ -327,7 +339,7 @@ async function handleInvite(req, res, options) {
     }
   }
 
-  console.log('[' + new Date().toISOString() + '] CALL Incoming from: ' + callerId + ' to ext: ' + (dialedExt || 'unknown'));
+  console.log('[' + new Date().toISOString() + '] CALL Accepted INVITE to configured extension');
 
   try {
     // Strip video from SDP to avoid FreeSWITCH 488 error with unsupported video codecs
@@ -348,7 +360,15 @@ async function handleInvite(req, res, options) {
       if (endpoint) endpoint.destroy().catch(function() {});
     });
 
-    await conversationLoop(endpoint, dialog, callUuid, options, deviceConfig);
+    const maxCallMs = callPolicy.maxDurationMs;
+    const deadlineAt = maxCallMs > 0 ? Date.now() + maxCallMs : null;
+    const callTimer = maxCallMs > 0 ? setTimeout(() => { try { Promise.resolve(dialog.destroy()).catch(() => {}); } catch {} }, maxCallMs) : null;
+    try {
+      if ((process.env.PHONE_VOICE_MODE || 'live') === 'live')
+        await require('./live-call').runLiveCall(endpoint, dialog, callUuid, {...options, ...(deadlineAt ? {deadlineAt} : {})});
+      else await conversationLoop(endpoint, dialog, callUuid, options, deviceConfig);
+    }
+    finally { if (callTimer) clearTimeout(callTimer); }
     return { endpoint: endpoint, dialog: dialog, callerId: callerId, callUuid: callUuid };
 
   } catch (error) {

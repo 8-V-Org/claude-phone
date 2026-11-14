@@ -1,0 +1,17 @@
+'use strict';
+const string=description=>({type:'STRING',description}),confirmed={type:'BOOLEAN',description:'True only after caller explicitly confirmed this exact action/destination. Never assume confirmation.'};
+const declaration=(name,description,properties={},required=[])=>({name,description,behavior:'NON_BLOCKING',parameters:{type:'OBJECT',properties,required}});
+function phoneToolDeclarations(){return [
+ declaration('phone_capabilities','Read actual phone feature limits and missing credential/license gates. For SMS, point to the owner SMS Cloudflare MCP server (portal server sms on ai-bot.8-v.org and ai-dev.8-v.org). Never invent supervisor or XAPI support.'),
+ declaration('transfer_blind','Transfer the current caller using SIP REFER after explicit confirmation. Accepted REFER is not completed transfer; wait for final NOTIFY.',{target:string('Internal extension or explicitly allowed E.164 destination'),confirmed},['target','confirmed']),
+ declaration('transfer_attended','After explicit confirmation: hold caller, establish second SIP call, then REFER with Replaces after answer. This is automatic answered-leg attended signaling, NOT a private human consultation interval. Failure restores caller where possible.',{target:string('Internal extension or explicitly allowed E.164 destination'),confirmed},['target','confirmed']),
+ declaration('call_park','Park current caller by confirmed blind REFER to configured park code/orbit. Final NOTIFY is needed for completion.',{orbit:string('Orbit 1 through 9'),confirmed},['orbit','confirmed']),
+ declaration('call_unpark','Connect current caller to a parked-call retrieval dial code. May optionally specify extension suffix, as configured by PBX.',{orbit:string('Orbit 1 through 9'),extension:string('Optional internal extension suffix'),confirmed},['orbit','confirmed']),
+ declaration('call_pickup','Connect current caller to PBX pickup code for a specific ringing internal extension, or unspecified longest-ringing eligible call. PBX rights still apply.',{extension:string('Optional ringing internal extension'),confirmed},['confirmed']),
+ declaration('presence_set','Request profile change for THIS ASSISTANT EXTENSION ONLY using configured *30–*34 defaults. PBX answer does not independently verify profile state.',{status:{type:'STRING',enum:['available','away','dnd','custom1','custom2']},confirmed},['status','confirmed']),
+ declaration('presence_watch','Start/status/stop a bounded SIP dialog-event BLF subscription. Reports call state only, NOT registration, DND/profile or human availability. Tenant support is capability-detected.',{extension:string('Internal extension'),action:{type:'STRING',enum:['start','status','stop']}},['extension','action']),
+ declaration('voicemail_leave','Transfer confirmed caller directly to an internal extension voicemail using the configured *4 default prefix.',{extension:string('Internal extension'),confirmed},['extension','confirmed']),
+ declaration('voicemail_check','Connect caller to 999 (or configured voicemail code) and send the protected stored PIN by DTMF. Never ask for a spoken PIN or expose it. Disabled if no private PIN file.',{confirmed},['confirmed']),
+ declaration('xapi_call_logs','License/configuration-gated unavailable XAPI stub. Do not claim call-log access on Free SMB.'),
+ declaration('xapi_recordings','License/configuration-gated unavailable XAPI stub. Do not claim recordings access on Free SMB.')];}
+module.exports={phoneToolDeclarations};

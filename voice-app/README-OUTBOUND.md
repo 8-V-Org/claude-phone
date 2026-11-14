@@ -1,3 +1,23 @@
+# Current private operator outbound calls
+
+Use the existing loopback bridge and authenticated operator CLI from the repository root:
+
+    node bin/phone-op.cjs dial EXT_OR_E164 UNIQUE_REQUEST_ID --conversation --message-file /private/path/briefing.txt
+
+The owner must explicitly authorize the call and destination. Message files contain a per-call briefing (1–2000 printable characters), not a global greeting change. Protect them with mode 0600 and delete or archive privately after use. The operator credential is derived internally; never print it. Custom messages require conversation mode, are bound to the idempotency request ID, and travel only to the authenticated voice worker. Status responses and audit logs omit message content. Caller policy, permissions and consent safeguards remain unchanged. Clearly identify as AI; do not present owner-supplied facts as sensor observations.
+
+Check status with `node bin/phone-op.cjs job JOB_ID`. An answered/completed call indicates SIP/session completion, not proof that the recipient heard or understood the message. Never automatically redial an uncertain result. Approved-agent consultations require a free main-agent slot; release the dashboard turn while the call runs rather than changing concurrency.
+
+Voice and bridge images both need rebuilding/recreation after transport changes. Test with `node --test --test-concurrency=1 openclaw-adapter/*.test.cjs voice-app/test/*.test.js`.
+
+---
+
+# Archived upstream API reference
+
+**Not active in Gemini Live R2.** The deployment disables outbound/query HTTP APIs. Follow `../deployment/README.md`; this older API contract is retained only as an upstream reference.
+
+---
+
 # Outbound Calling API
 
 API reference for initiating outbound calls from Claude Phone.
@@ -32,7 +52,7 @@ Initiate an outbound call.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `to` | Yes | Phone number in E.164 format |
+| `to` | Yes | Extension, 10-digit, 11-digit, or +E.164 (normalized; no 9 prefix) |
 | `message` | Yes | Text to speak (max 1000 chars) |
 | `mode` | No | `announce` (default) or `conversation` |
 | `device` | No | Device name for voice/personality |
@@ -167,7 +187,7 @@ If `webhookUrl` is provided, POST requests are sent on state changes:
 
 | Error | Cause |
 |-------|-------|
-| `Invalid phone number format` | `to` not in E.164 format |
+| `Invalid phone number format` | `to` not an extension, 10-digit, 11-digit, or +E.164 |
 | `Message is required` | Missing `message` field |
 | `Message too long` | Message exceeds 1000 chars |
 | `Call not found` | Invalid `callId` |
@@ -308,3 +328,7 @@ curl -s -X POST http://localhost:3000/api/outbound-call \
   -H "Content-Type: application/json" \
   -d "{\"to\": \"$PHONE\", \"message\": \"$MESSAGE\"}"
 ```
+
+## SMS
+
+SMS is handled by the owner's custom SMS Cloudflare MCP server (portal server `sms` on ai-bot.8-v.org and ai-dev.8-v.org; Worker `sms.leland-cheung.workers.dev/mcp`; bearer auth). Do not say SMS is unavailable and do not embed secrets.
